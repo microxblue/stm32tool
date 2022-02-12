@@ -396,7 +396,6 @@ class STM32_CON:
                 if type(keys) is str:
                     self.stm_usb.write(keys.encode())
                 else:
-                    print ('xxx')
                     try:
                         self.stm_usb.write('\n')
                         self.stm_usb.read(STM32_USB_DEV.MAX_PKT)
@@ -949,6 +948,13 @@ def main():
         print('')
         sys.stdout.flush()
 
+    wait_done = True
+    if 'e' in options or 'p' in options:
+        result = stm_comm.check_result ()
+        if len(result) != STM32_USB_DEV.MAX_PKT:
+          print ('Disable command wait for erasing and programming !')
+          wait_done = False
+
     if 'e' in options:
         print('Erasing...')
         psize = address
@@ -962,7 +968,10 @@ def main():
                 print("Erasing   block   0x%08X - " % psize, end = '')
                 if stm_comm.short_cmd  (STM32_COMM.CMD_ERASE_BLOCK, 0,  psize, blksize) :
                     raise SystemExit ("ERR: failed to erase flash !")
-
+                if wait_done:
+                    result = stm_comm.check_result ()
+                    if len(result) != STM32_USB_DEV.MAX_PKT:
+                        raise SystemExit ("ERR: failed to receive status !")
                 if (target == STM32_COMM.TARGET_DEDIPROG) and (len(stm_comm.get_status ()) == 0):
                     raise SystemExit ("ERR: failed to wait for erasing done !")
 
@@ -1013,6 +1022,10 @@ def main():
                 for idx in range (0, len(tmp), usb_plen):
                     if stm_comm.stm_usb.write (tmp[idx:idx+usb_plen], STM32_COMM.USB_WR_TIMEOUT) != usb_plen:
                         break
+                    if wait_done:
+                        result = stm_comm.check_result ()
+                        if len(result) != STM32_USB_DEV.MAX_PKT:
+                            raise SystemExit ("ERR: failed to receive status !")
                     slen += usb_plen
 
                 if  slen != pagesize:
