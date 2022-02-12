@@ -1,3 +1,9 @@
+# @file
+#
+#  Copyright (c) 2022, Microxblue. All rights reserved.
+#  SPDX-License-Identifier: BSD-2-Clause-Patent
+#
+
 import os
 import sys
 import time
@@ -145,9 +151,9 @@ class STM32_NET_DEV:
     MAX_PKT     = 1024
     DEV_MAX_PKT = 64
 
-    def __init__(self, devaddr, product, interface = 0):
+    def __init__(self, devaddr, port, interface = 0):
         # find our device
-        self.port   = 8888 if interface == 0 else 8800
+        self.port   = port if interface == 0 else port+1
         self.stream = True if interface == 0 else False
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket.setsockopt (socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -332,12 +338,10 @@ class STM32_USB_DEV:
 class STM32_CON:
 
     def __init__(self, devaddr='', product=0x1023):
-        if product == 0:
+        if devaddr and not devaddr.isdecimal():
             self.stm_usb = STM32_NET_DEV(devaddr, product, 0)
         else:
             self.stm_usb = STM32_USB_DEV(devaddr, product, 0)
-
-
 
     def console_drain (self):
         res = b' '
@@ -392,6 +396,7 @@ class STM32_CON:
                 if type(keys) is str:
                     self.stm_usb.write(keys.encode())
                 else:
+                    print ('xxx')
                     try:
                         self.stm_usb.write('\n')
                         self.stm_usb.read(STM32_USB_DEV.MAX_PKT)
@@ -440,7 +445,7 @@ class STM32_COMM:
     }
 
     def __init__(self, devaddr='', product=0x1023):
-        if product == 0:
+        if devaddr and not devaddr.isdecimal():
             self.stm_usb = STM32_NET_DEV(devaddr, product, 1)
         else:
             self.stm_usb = STM32_USB_DEV(devaddr, product, 1)
@@ -580,24 +585,28 @@ class STM32_COMM:
 
 
 def update_dev (remain):
-    usbaddr = ''
-    pid     = STM32_USB_DEV.MY_PID
-
+    addr = ''
+    pid  = STM32_USB_DEV.MY_PID
     remain = remain.strip()
-    if remain.startswith('.'):
+    if ':' in remain:
+        # network target format  host:port
+        parts = remain.split(':')
+        addr  = parts[0]
+        pid   = int(parts[1], 0)
+    elif remain.startswith('.'):
         if len(remain) > 1:
-            if   remain[1] == '@':
+            if   remain[1] == '$':
+                pid  = 8800
+                addr = 'localhost'
+            elif   remain[1] == '@':
                 pid = STM32_USB_DEV.MY_PID2
             elif remain[1] == '!':
                 pid = STM32_USB_DEV.MY_PID3
             elif remain[1:].startswith('0x'):
                 pid = int(remain[1:], 16)
             else:
-                pid = 0
-                usbaddr = remain[1:].strip()
-    elif len(remain) > 0:
-        usbaddr = remain
-    return usbaddr, pid
+                raise Exception ("Invalid address format '%s' !" % remain)
+    return addr, pid
 
 
 def usage ():
