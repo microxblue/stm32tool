@@ -535,11 +535,7 @@ class STM32_COMM:
 
 
     def speed_test (self, plen, test_time):
-        if self.mcu_type == 'stm32f407':
-            test_cmds = {'w':'@dl 2',  'r':'@dl 3'}
-        else:
-            test_cmds = {'w':'@usbt 0', 'r':'@usbt 1'}
-
+        test_cmds = {'w':'@dl 2',  'r':'@dl 3'}
         if (self.shell_cmd  (test_cmds['w'])) :
             raise SystemExit ("ERR: failed to send shell command !")
         time.sleep(.1)
