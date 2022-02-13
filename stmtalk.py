@@ -147,7 +147,7 @@ class KbHit:
 
 class STM32_NET_DEV:
 
-    DEF_TIMEOUT = .3
+    DEF_TIMEOUT = .05
     MAX_PKT     = 1024
     DEV_MAX_PKT = 64
 
@@ -158,8 +158,9 @@ class STM32_NET_DEV:
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket.setsockopt (socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.socket.setsockopt (socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        self.socket.settimeout (STM32_NET_DEV.DEF_TIMEOUT)
+        self.socket.settimeout (0.5)
         self.socket.connect((devaddr, self.port))
+        self.socket.settimeout (STM32_NET_DEV.DEF_TIMEOUT)
         self.rx_buf = b''
 
     def read (self, length = MAX_PKT, timeout = DEF_TIMEOUT):
@@ -309,7 +310,7 @@ class STM32_USB_DEV:
             print ('Cannot find End Point!')
             return
 
-    def read (self, length = MAX_PKT, timeout = 100):
+    def read (self, length = MAX_PKT, timeout = 10):
         try:
             data = self.dev.read(self.epin, length, timeout)
         except usb.USBError as e:
@@ -320,7 +321,7 @@ class STM32_USB_DEV:
                 raise SystemExit ('\n%s' % repr(e))
         return data
 
-    def write (self, data, timeout = 100):
+    def write (self, data, timeout = 10):
         try:
             ret = self.dev.write(self.epout, data)
         except usb.USBError as e:
@@ -504,9 +505,9 @@ class STM32_COMM:
         else:
             return 0
 
-    def check_result (self):
+    def check_result (self, timeout=100):
         self.short_cmd  (STM32_COMM.CMD_CHECK, 0x10, 0, 0)
-        sts = self.stm_usb.read(STM32_USB_DEV.MAX_PKT, 1000)
+        sts = self.stm_usb.read(STM32_USB_DEV.MAX_PKT, timeout)
         if len(sts) != STM32_USB_DEV.MAX_PKT:
             return bytearray ()
         else:
@@ -800,10 +801,9 @@ def main():
     if (stm_comm.shell_cmd  (cmdstr)) :
         raise SystemExit ("ERR: failed to send shell command !")
 
-    time.sleep(.05)
+    time.sleep(0.05)
 
     # Switch address mode
-
 
     #
     # Check target status by sending a PING
@@ -950,7 +950,7 @@ def main():
 
     wait_done = True
     if 'e' in options or 'p' in options:
-        result = stm_comm.check_result ()
+        result = stm_comm.check_result (1000)
         if len(result) != STM32_USB_DEV.MAX_PKT:
           print ('Disable command wait for erasing and programming !')
           wait_done = False
@@ -969,7 +969,7 @@ def main():
                 if stm_comm.short_cmd  (STM32_COMM.CMD_ERASE_BLOCK, 0,  psize, blksize) :
                     raise SystemExit ("ERR: failed to erase flash !")
                 if wait_done:
-                    result = stm_comm.check_result ()
+                    result = stm_comm.check_result (1000)
                     if len(result) != STM32_USB_DEV.MAX_PKT:
                         raise SystemExit ("ERR: failed to receive status !")
                 if (target == STM32_COMM.TARGET_DEDIPROG) and (len(stm_comm.get_status ()) == 0):
@@ -1022,10 +1022,6 @@ def main():
                 for idx in range (0, len(tmp), usb_plen):
                     if stm_comm.stm_usb.write (tmp[idx:idx+usb_plen], STM32_COMM.USB_WR_TIMEOUT) != usb_plen:
                         break
-                    if wait_done:
-                        result = stm_comm.check_result ()
-                        if len(result) != STM32_USB_DEV.MAX_PKT:
-                            raise SystemExit ("ERR: failed to receive status !")
                     slen += usb_plen
 
                 if  slen != pagesize:
@@ -1034,9 +1030,13 @@ def main():
                 if (psize & (blksize - 1)) == 0:
                     print ("DONE")
 
+            if wait_done:
+                result = stm_comm.check_result (1000)
+                if len(result) != STM32_USB_DEV.MAX_PKT:
+                    raise SystemExit ("ERR: failed to receive status !")
+
             psize += pagesize
             sys.stdout.flush()
-
 
         fpi.close ()
         print('%d out of %d blocks were programmed !' % (prog_blk, psize >> 16))

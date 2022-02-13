@@ -50,8 +50,8 @@ class UsbPipeThread(Thread):
                         raise
 
                 if len (rx_buf) > 0:
-                    if self.tx_qu.full():
-                        self.tx_qu.get ()
+                    while self.tx_qu.full():
+                        time.sleep (.1)
                     tx_data = bytearray(rx_buf)
                     #print ("USB RX: %s" % tx_data.decode())
                     self.tx_qu.put (tx_data)
@@ -60,9 +60,9 @@ class UsbPipeThread(Thread):
                     rx_data = self.rx_qu.get()
                     #print ("USB TX: %s" % rx_data.decode())
                     try:
-                        self.stm_usb.write(rx_data, 10)
+                        self.stm_usb.write(rx_data, 100)
                     except:
-                        pass
+                        print ('USB write failed for inf %d' % self.inf)
 
             print('=> USB stopped running (inf:%d)' % self.inf)
 
@@ -141,8 +141,8 @@ class TcpThread(Thread):
                         rx_buf  = b''
 
                     if len(pkt_buf) > 0:
-                        if self.rx_qu.full():
-                            self.rx_qu.get ()
+                        while self.rx_qu.full():
+                            time.sleep (.1)
 
                         rx_data = pkt_buf
                         self.rx_qu.put (rx_data)
