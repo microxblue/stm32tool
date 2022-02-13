@@ -29,17 +29,22 @@ def value_to_bytes (value, length):
 def bytes_to_value (bytes):
     return int.from_bytes (bytes, 'little')
 
-def print_bytes (data, indent=0, offset=0, show_ascii = False):
+def bytes_to_print_str (data, indent=0, offset=0, show_ascii = False):
     bytes_per_line = 16
     printable = ' ' + string.ascii_letters + string.digits + string.punctuation
     str_fmt = '{:s}{:04x}: {:%ds} {:s}' % (bytes_per_line * 3)
     bytes_per_line
     data_array = bytearray(data)
+    lines = []
     for idx in range(0, len(data_array), bytes_per_line):
         hex_str = ' '.join('%02X' % val for val in data_array[idx:idx + bytes_per_line])
         asc_str = ''.join('%c' % (val if (chr(val) in printable) else '.')
                           for val in data_array[idx:idx + bytes_per_line])
-        print (str_fmt.format(indent * ' ', offset + idx, hex_str, ' ' + asc_str if show_ascii else ''))
+        lines.append (str_fmt.format(indent * ' ', offset + idx, hex_str, ' ' + asc_str if show_ascii else ''))
+    return '\n'.join(lines)
+
+def print_bytes (data, indent=0, offset=0, show_ascii = False):
+    print (bytes_to_print_str (data, indent, offset, show_ascii))
 
 def log2 (x):
     return x.bit_length() - 1
@@ -147,7 +152,7 @@ class KbHit:
 
 class STM32_NET_DEV:
 
-    DEF_TIMEOUT = .05
+    DEF_TIMEOUT = .001
     MAX_PKT     = 1024
     DEV_MAX_PKT = 64
 
@@ -791,7 +796,7 @@ def main():
 
 
     if 't' in options :
-        stm_comm.speed_test (STM32_USB_DEV.MAX_PKT * 8, 2.0)
+        stm_comm.speed_test (STM32_USB_DEV.MAX_PKT, 2.0)
         return 0
 
     if (stm_comm.shell_cmd  (cmdstr)) :

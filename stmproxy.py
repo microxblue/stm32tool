@@ -10,11 +10,11 @@ import time
 import argparse
 import usb.core
 import usb.util
+import logging
 import socket
 import queue
 from threading import Thread
-from stmtalk import KbHit, STM32_USB_DEV, bytes_to_value, value_to_bytes, print_bytes
-
+from stmtalk import KbHit, STM32_USB_DEV, bytes_to_value, value_to_bytes, bytes_to_print_str
 
 # A class that extends the Thread class
 class UsbPipeThread(Thread):
@@ -38,40 +38,37 @@ class UsbPipeThread(Thread):
                 time.sleep (3)
                 continue
 
-            print('=> USB started running (inf:%d)' % self.inf)
+            rx_buf = bytearray()
+            logging.info ('=> USB started running (inf:%d)' % self.inf)
             while not self.quit[0]:
-                try:
-                    rx_buf = self.stm_usb.read(64)
-                except usb.USBError as e:
-                    err_str = repr(e)
-                    if ('timeout error' in err_str) or ('timed out' in err_str):
-                        rx_buf = b''
-                    else:
-                        raise
+                if len (rx_buf) == 0:
+                    try:
+                        rx_buf = bytearray(self.stm_usb.read(64))
+                    except usb.USBError as e:
+                        err_str = repr(e)
+                        if ('timeout error' in err_str) or ('timed out' in err_str):
+                            rx_buf = bytearray()
+                        else:
+                            raise
 
-                if len (rx_buf) > 0:
-                    while self.tx_qu.full():
-                        time.sleep (.1)
-                    tx_data = bytearray(rx_buf)
-                    #print ("USB RX: %s" % tx_data.decode())
-                    self.tx_qu.put (tx_data)
+                if len (rx_buf) > 0 and not self.tx_qu.full():
+                    logging.debug ("USB interface %d RX: (len: %d)\n%s" % (self.inf, len(rx_buf), bytes_to_print_str (rx_buf, indent = 3)))
+                    self.tx_qu.put (bytearray(rx_buf))
+                    rx_buf.clear()
 
                 if not self.rx_qu.empty():
                     rx_data = self.rx_qu.get()
-                    #print ("USB TX: %s" % rx_data.decode())
-                    try:
-                        self.stm_usb.write(rx_data, 100)
-                    except:
-                        print ('USB write failed for inf %d' % self.inf)
+                    logging.debug ('USB interface %d TX: (len: %d)\n%s' % (self.inf, len(rx_data), bytes_to_print_str (rx_data, indent = 3)))
+                    self.stm_usb.write(rx_data)
 
-            print('=> USB stopped running (inf:%d)' % self.inf)
+            logging.info ('=> USB stopped running (inf:%d)' % self.inf)
 
             time.sleep (.3)
 
         if self.stm_usb is not None:
             self.stm_usb.close()
 
-        print ("=> USB thread quit (inf:%d)" % self.inf)
+        logging.info  ("=> USB thread quit (inf:%d)" % self.inf)
 
 
 
@@ -107,73 +104,62 @@ class TcpThread(Thread):
             conn.setblocking(True)
             conn.settimeout(.05)
 
-            rx_buf = b''
-            print("=> Connection created with (%s:%d)" % (repr(address[0]), self.port))
+            rx_buf = bytearray ()
+            logging.info ("=> Connection created with (%s:%d)" % (repr(address[0]), self.port))
             while not self.quit[0]:
                 # receive data stream. it won't accept data packet greater than 1024 bytes
                 try:
-                    tmp_buf = conn.recv(TcpThread.MAX_PKT)
+                    tmp_buf = bytearray (conn.recv(TcpThread.MAX_PKT))
                     if len (tmp_buf) == 0:
                         break
                 except socket.timeout as e:
-                    tmp_buf = b''
+                    tmp_buf = bytearray ()
                 except:
                     break
+
                 if len(tmp_buf) > 0:
-                    rx_buf = rx_buf + tmp_buf
+                    rx_buf.extend (tmp_buf)
 
-                if len(rx_buf) > 0:
-                    if 0:
-                        print ('TCP RX:', self.port)
-                        print_bytes (rx_buf, 2)
-
+                if len(rx_buf) > 0 and not self.rx_qu.full():
                     if not self.stream:
-                        if rx_buf[0:2] != b'$P':
-                            print("Unexpected packet header received !")
-                            pkt_buf = b''
-                            rx_buf  = b''
-                        else:
+                        if rx_buf[0:2] == b'$P':
                             pkt_len = bytes_to_value(rx_buf[2:4])
                             pkt_buf = bytearray(rx_buf[4:4+pkt_len])
-                            rx_buf  = rx_buf[4+pkt_len:]
+                            del (rx_buf[:4+pkt_len])
+                        else:
+                            logging.error ("Unexpected packet header received !")
                     else:
                         pkt_buf = bytearray(rx_buf)
-                        rx_buf  = b''
+                        rx_buf.clear()
 
                     if len(pkt_buf) > 0:
-                        while self.rx_qu.full():
-                            time.sleep (.1)
-
                         rx_data = pkt_buf
+                        logging.debug ('TCP port %d RX: (len: %d)\n%s' % (self.port, len(rx_data), bytes_to_print_str (rx_data, indent = 3)))
                         self.rx_qu.put (rx_data)
 
                 if not self.tx_qu.empty():
                     tx_data = self.tx_qu.get()
-
+                    logging.debug ('TCP port %d TX: (len: %d)\n%s' % (self.port, len(tx_data), bytes_to_print_str (tx_data, indent = 3)))
                     if not self.stream:
-                        tx_data = bytearray(b'$P') + value_to_bytes(len(tx_data) & 0xffff,2) + tx_data
-
-                    if 0:
-                        print ('TCP TX:', self.port)
-                        print_bytes (tx_data, 2)
-
-                    try:
-                        conn.send(tx_data)
-                    except:
-                        pass
+                        tx_data = bytearray(b'$P') + value_to_bytes(len(tx_data) & 0xffff, 2) + tx_data
+                    conn.send(tx_data)
 
             conn.close()  # close the connection
 
-            print("=> Connection closed with (%s:%d)" % (repr(address[0]), self.port))
+            logging.info ("=> Connection closed with (%s:%d)" % (repr(address[0]), self.port))
 
-        print ("=> TCP thread quit (port:%d)" % self.port)
+        logging.info ("=> TCP thread quit (port:%d)" % self.port)
+
 
 class  UsbProxy:
+    TX_QUEUE_SIZE = 64
+    RX_QUEUE_SIZE = 64
+
     def __init__ (self, host, port, pid):
-        self.tx_qu0 = queue.Queue(64)
-        self.rx_qu0 = queue.Queue(64)
-        self.tx_qu1 = queue.Queue(64)
-        self.rx_qu1 = queue.Queue(64)
+        self.tx_qu0 = queue.Queue(UsbProxy.TX_QUEUE_SIZE)
+        self.rx_qu0 = queue.Queue(UsbProxy.RX_QUEUE_SIZE)
+        self.tx_qu1 = queue.Queue(UsbProxy.TX_QUEUE_SIZE)
+        self.rx_qu1 = queue.Queue(UsbProxy.RX_QUEUE_SIZE)
 
         self.quit  = [0]
         self.usb_thread0 = UsbPipeThread(self.tx_qu0, self.rx_qu0, self.quit, inf = 0, pid = int(pid, 0))
@@ -190,22 +176,32 @@ class  UsbProxy:
     def stop (self):
         self.quit[0] = 1
 
+
 def main ():
+
     parser = argparse.ArgumentParser()
-    parser.add_argument('-pid',  dest='pid',  type=str,  default=hex(STM32_USB_DEV.MY_PID), help='USB PID hex string')
-    parser.add_argument('-port', dest='port', type=int,  default = 8800, help='Network proxy ports (N and N+1) for STM32 USB device interfaces (0 and 1)')
-    parser.add_argument('-addr', dest='addr', type=str,  default = '0.0.0.0', help='Network proxy host address')
+    parser.add_argument('-pid',  dest='pid',   type=str,   default=hex(STM32_USB_DEV.MY_PID), help='USB PID hex string')
+    parser.add_argument('-p',    dest='port',  type=int,   default = 8800, help='Network proxy ports (N and N+1) for STM32 USB device interfaces (0 and 1)')
+    parser.add_argument('-a' ,   dest='addr',  type=str,   default = '0.0.0.0', help='Network proxy host address')
+    parser.add_argument('-d',    dest='debug', action="store_true", default=False, help='Enable debug print')
 
     args = parser.parse_args()
 
-    kb    = KbHit()
+    dbglvl = logging.DEBUG if args.debug else logging.INFO
+    logging.basicConfig(level=dbglvl,  format='%(asctime)s.%(msecs)03d %(message)s', datefmt='%H:%M:%S')
+
     proxy = UsbProxy (args.addr, args.port, args.pid)
     proxy.start()
 
+    kb    = KbHit()
     while True:
         if kb.kbhit():
-            break
-        time.sleep (.5)
+            ch = kb.getch()
+            if ch == chr(27):
+                # ESC key, quit
+                break
+        time.sleep (.1)
+
     proxy.stop ()
 
 
